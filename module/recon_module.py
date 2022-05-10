@@ -63,7 +63,7 @@ class Decoder(nn.Module):
         self.down_rate = config['Model']['Reconstruction']['downSampling_rate']
 
         n_AttnBlock = config["Model"]['Reconstruction']['n_DecAttnBlock']
-        n_conv = config["Model"]['Reconstruction']['n_DecConvBlock']
+        n_conv = config["Model"]['Reconstruction']['n_DecConv']
         
 
         """ Architecture """
@@ -85,7 +85,7 @@ class Decoder(nn.Module):
         ])
 
         self.conv_net = nn.Sequential(*[
-            DecConvBlock(config) for _ in range(n_conv)
+            DecoderConv(config) for _ in range(n_conv)
         ])
 
         #self.upsampling = nn.ConvTranspose1d(d_spk + d_cnt, d_dec, kernel_size=down_rate, stride=down_rate)
@@ -117,15 +117,17 @@ class Decoder(nn.Module):
         cond = self.dense_net(spk_emb)
 
         # Feed Conv layers
+        out = hid
         for layer in self.conv_net:
             hid = layer(hid, cond=cond)
+        out = hid + out
         
         # Feed Attention Blocks
         for attn in self.dec_attn:
             hid = attn(hid, cond=cond)  # (B, T, C)
 
 
-        return self.post_linear(hid)
+        return self.post_linear(out)
 
 
 
@@ -158,26 +160,18 @@ class ContentsNetwork(nn.Module):
 
         d_enc = config["Model"]["Reconstruction"]["d_hid_encoder"]
         d_cnt = config["Model"]["Reconstruction"]["d_contents"]
-        dropout = config['Model']['Reconstruction']['dropout']
 
-        n_cnt = config["Model"]["Reconstruction"]["n_ContentsBlock"]
+        n_cnt = config["Model"]["Reconstruction"]["n_contents"]
         kernel_size = config["Model"]['Reconstruction']['kernel_size']
         padding = (kernel_size - 1) // 2
 
         self.conv_net = nn.Sequential(*[
-            EncContentsBlock(config) for _ in range(n_cnt)
+            ContentsConv(config, d_enc, d_cnt if i == n_cnt - 1 else d_enc) for i in range(n_cnt)
         ])
-
-        self.last_linear = nn.Sequential(
-            nn.Linear(d_enc, d_cnt),
-            nn.Dropout(dropout),
-            nn.LayerNorm(d_cnt),
-            nn.GELU()
-        )
 
 
     def forward(self, x):
-        return self.last_linear(self.conv_net(x))
+        return self.conv_net(x)
 
 
 
