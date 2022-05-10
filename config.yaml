@@ -1,0 +1,70 @@
+Preprocess:
+  n_fft: 1024
+  n_hop: 256
+  n_mel: 80
+
+  sr: 22050 # Hz
+
+Dataset:
+  name: "VCTK"
+  num_speaker: 100
+  num_emotion: 5
+
+  data_path: "/data1/vctk/wav_22050/"
+  mel_path: "./VCTK_preprocessed/mel/"
+
+Loader:
+  mel_length: 128
+
+Model:
+  Reconstruction:
+
+    d_head: 4
+    d_hid_encoder: 256
+    d_hid_decoder: 512
+
+    d_speaker: 128
+    d_contents: 64
+
+    n_EncAttnBlock: 2
+    n_speaker: 4
+    n_contents: 6
+
+    n_DecConv: 4
+    n_DecAttnBlock: 2
+
+    kernel_size: 5
+    downSampling_rate: 16
+    dropout: 0.1
+
+  Classifier:
+    n_Mapping: 8
+    n_AttnBlock: 2
+
+
+Train:
+  wandb_login: True
+
+  save_model_path: "./save_model/"
+  save_for_step: 5000
+
+  epoch: 30
+  batch_size: 32
+  num_workers: 8
+
+  learning_rate: 0.0001
+  weight_decay: 0.
+
+  scheduler_size: 1000
+  scheduler_gamma: 0.98
+
+  lambda_adv: 0.01
+  lambda_spk: 0.2
+  lambda_gp: 20
+
+
+
+Result:
+  asset_dir_path: "./assets/"
+  tsne_save_name: "tsne_speaker.jpg"
+  reconMel_save_name: "recon_mel.jpg"
