@@ -1,4 +1,3 @@
-from os import times
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,10 +27,8 @@ class DisentangleReconstruction(nn.Module):
 
         """ Architecture """ 
         # 1. Positional Encoding & PreNet
-        self.prenet = PreNet(config)
-
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_enc))
-        self.pos_enc = PositionalEncoding(d_enc)
+        self.prenet = PreNet(config)
 
         # 2. Encoder, Decoder
         self.encoder = Encoder(config)
@@ -54,8 +51,6 @@ class DisentangleReconstruction(nn.Module):
         x = self.prenet(mel_input)
 
         x = torch.cat([self.cls_token.repeat(batch_size, 1, 1), x], dim=1)
-
-        x = self.pos_enc(x)
 
         # 2) Encoder
         spk_emb, cnt_emb = self.encoder(x)

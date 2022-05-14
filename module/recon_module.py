@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
 from .recon_layer import *
+from recon_utils import PositionalEncoding
 
 
 class Encoder(nn.Module):
@@ -17,16 +18,26 @@ class Encoder(nn.Module):
         d_cnt = config['Model']['Reconstruction']['d_contents']
         self.down_rate = config['Model']['Reconstruction']['downSampling_rate']
 
+        
         n_AttnBlock = config["Model"]['Reconstruction']['n_EncAttnBlock']
+        n_ConvBlock = config["Model"]['Reconstruction']['n_EncConvBlock']
 
         """ Architecture """
+        self.pos_enc = PositionalEncoding(d_enc)
+
         self.enc_attn = nn.Sequential(*[
-            Enc_AttnBlock(config) for _ in range(n_AttnBlock)
+            EncAttnBlock(config) for _ in range(n_AttnBlock)
         ])
 
         self.spk_net = SpeakerNetwork(config)
 
-        self.cnt_net = ContentsNetwork(config)
+        self.cnt_net = nn.Sequential(
+            *[EncConvBlock(config) for i in range(n_ConvBlock)],
+            nn.Linear(d_enc, d_cnt),
+            nn.LayerNorm(d_cnt),
+            nn.Tanh()
+        )
+
         #self.downsampling = nn.AvgPool1d(down_rate, stride=down_rate)   # AvgPool will make degrade.
 
 
@@ -35,6 +46,7 @@ class Encoder(nn.Module):
         batch_size, _, channels = input.shape
 
         # Feed Attention Blocks
+        input = self.pos_enc(input)
         hid = self.enc_attn(input)
 
         # Speaker Embedding
@@ -63,12 +75,12 @@ class Decoder(nn.Module):
         self.down_rate = config['Model']['Reconstruction']['downSampling_rate']
 
         n_AttnBlock = config["Model"]['Reconstruction']['n_DecAttnBlock']
-        n_conv = config["Model"]['Reconstruction']['n_DecConv']
+        n_ConvBlock = config["Model"]['Reconstruction']['n_DecConvBlock']
         
 
         """ Architecture """
         self.dec_attn = nn.Sequential(*[
-            Dec_AttnBlock(config) for _ in range(n_AttnBlock)
+            DecAttnBlock(config) for _ in range(n_AttnBlock)
         ])
 
         self.pre_linear = nn.Sequential(
@@ -77,15 +89,16 @@ class Decoder(nn.Module):
             nn.LayerNorm(d_dec),
             nn.GELU()
         )
+        self.pos_dec = PositionalEncoding(d_dec)
 
         self.post_linear = nn.Linear(d_dec, n_mel)
 
         self.dense_net = nn.Sequential(*[
-            nn.Sequential(nn.Linear(d_spk, d_spk), nn.ReLU()) for _ in range(8)
+            nn.Sequential(nn.Linear(d_spk, d_spk), nn.ReLU() if i != 8 else nn.Tanh()) for i in range(8)
         ])
 
         self.conv_net = nn.Sequential(*[
-            DecoderConv(config) for _ in range(n_conv)
+            DecConvBlock(config) for _ in range(n_ConvBlock)
         ])
 
         #self.upsampling = nn.ConvTranspose1d(d_spk + d_cnt, d_dec, kernel_size=down_rate, stride=down_rate)
@@ -111,23 +124,24 @@ class Decoder(nn.Module):
         # upsampling
         hid = self.pre_linear(cnt_emb).contiguous().transpose(1, 2)
         hid = F.interpolate(hid, scale_factor=self.down_rate, mode='nearest').contiguous().transpose(1, 2)
+        hid = self.pos_dec(hid)
         # hid: (B, T, C)
 
         # condition embedding (for Conditional LayerNorm)
         cond = self.dense_net(spk_emb)
 
         # Feed Conv layers
-        out = hid
+        res = hid
         for layer in self.conv_net:
             hid = layer(hid, cond=cond)
-        out = hid + out
+        hid = hid + res
         
         # Feed Attention Blocks
         for attn in self.dec_attn:
             hid = attn(hid, cond=cond)  # (B, T, C)
 
 
-        return self.post_linear(out)
+        return self.post_linear(hid)
 
 
 
@@ -141,37 +155,17 @@ class SpeakerNetwork(nn.Module):
         n_spk = config["Model"]["Reconstruction"]["n_speaker"]
 
         self.fc_net = []
-        f = spectral_norm
 
         for i in range(n_spk):
-            self.fc_net.append(f(nn.Linear(d_spk if i != 0 else d_enc, d_spk)))
-            self.fc_net.append(nn.LayerNorm(d_spk))
+            self.fc_net.append(nn.Linear(d_spk if i != 0 else d_enc, d_spk))
             self.fc_net.append(nn.ReLU())
 
         self.fc_net = nn.Sequential(*self.fc_net)
 
     def forward(self, x):
-        return self.fc_net(x)
+        out = self.fc_net(x)
+        return out.div(torch.norm(out, p=2, dim=-1, keepdim=True))
 
-
-class ContentsNetwork(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-
-        d_enc = config["Model"]["Reconstruction"]["d_hid_encoder"]
-        d_cnt = config["Model"]["Reconstruction"]["d_contents"]
-
-        n_cnt = config["Model"]["Reconstruction"]["n_contents"]
-        kernel_size = config["Model"]['Reconstruction']['kernel_size']
-        padding = (kernel_size - 1) // 2
-
-        self.conv_net = nn.Sequential(*[
-            ContentsConv(config, d_enc, d_cnt if i == n_cnt - 1 else d_enc) for i in range(n_cnt)
-        ])
-
-
-    def forward(self, x):
-        return self.conv_net(x)
 
 
 
@@ -189,10 +183,10 @@ class PreNet(nn.Module):
         dropout = config["Model"]["Reconstruction"]["dropout"]
 
         self.prenet = nn.Sequential(
-            nn.Linear(n_mel, d_hid),
+            nn.Linear(n_mel, d_hid, bias=False),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(d_hid, d_hid),
+            nn.Linear(d_hid, d_hid, bias=False),
             nn.GELU(),
             nn.Dropout(dropout)
         )

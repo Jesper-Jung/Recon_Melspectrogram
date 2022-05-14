@@ -20,20 +20,21 @@ Model:
   Reconstruction:
 
     d_head: 4
-    d_hid_encoder: 256
-    d_hid_decoder: 512
+    d_hid_encoder: 128
+    d_hid_decoder: 128
 
     d_speaker: 128
     d_contents: 64
 
-    n_EncAttnBlock: 2
+    n_EncAttnBlock: 3
+    n_EncConvBlock: 3
     n_speaker: 4
-    n_contents: 6
 
-    n_DecConv: 4
-    n_DecAttnBlock: 2
+    n_DecConvBlock: 3
+    n_DecAttnBlock: 3
 
     kernel_size: 5
+    scale_factor: 2
     downSampling_rate: 16
     dropout: 0.1
 
@@ -52,7 +53,7 @@ Train:
   batch_size: 32
   num_workers: 8
 
-  learning_rate: 0.0001
+  learning_rate: 0.0005
   weight_decay: 0.
 
   scheduler_size: 1000
